@@ -150,49 +150,35 @@
         let userEmail = "ゲストユーザー"; 
         let conversationHistory = "";    // ★追加: これまでの対話履歴
 
-        // --- API通信用関数 (GASへのフェッチ - JSONP対応) ---
+        // --- API通信用関数 (大量のテキストに対応したPOST送信に変更) ---
         async function callGasApi(action, params) {
             if (!GAS_API_URL || GAS_API_URL.includes("ここにウェブアプリのURL")) {
                 alert("GAS_API_URL が設定されていません。コードを確認してください。");
                 throw new Error("GAS_API_URL not configured");
             }
 
-            return new Promise((resolve, reject) => {
-                const callbackName = 'jsonp_callback_' + Math.round(1000000 * Math.random());
-                
-                window[callbackName] = function(data) {
-                    delete window[callbackName];
-                    const scriptEl = document.getElementById(callbackName);
-                    if (scriptEl) document.body.removeChild(scriptEl);
-                    
-                    if (data.status === "error") {
-                        reject(new Error(data.message));
-                    } else {
-                        resolve(data.data);
-                    }
-                };
+            const formData = new URLSearchParams();
+            formData.append('action', action);
+            for (const key in params) {
+                formData.append(key, params[key]);
+            }
 
-                const script = document.createElement('script');
-                script.id = callbackName;
+            try {
+                const response = await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    body: formData
+                });
                 
-                const queryParams = new URLSearchParams();
-                queryParams.append('action', action);
-                queryParams.append('callback', callbackName);
+                const data = await response.json();
                 
-                for (const key in params) {
-                    queryParams.append(key, params[key]);
+                if (data.status === "error") {
+                    throw new Error(data.message);
                 }
-
-                script.src = `${GAS_API_URL}?${queryParams.toString()}`;
-                
-                script.onerror = function() {
-                    delete window[callbackName];
-                    if (script.parentNode) document.body.removeChild(script);
-                    reject(new Error("GASとの通信に失敗しました。URLや公開設定を確認してください。"));
-                };
-
-                document.body.appendChild(script);
-            });
+                return data.data;
+            } catch (error) {
+                console.error("API Error:", error);
+                throw new Error("GASとの通信に失敗しました。URLや公開設定を確認してください。");
+            }
         }
 
         // --- 初期化処理：アカウント取得 ---
@@ -382,21 +368,19 @@
         // --- 動作概要３：スプレッドシートへの保存呼び出し ---
         function handleUserUtterance(text) {
             isProcessing = true;
-            isAnswerReceived = false; // ★追加: 質問ごとにフラグをリセット
+            isAnswerReceived = false; 
             
             setUIState(true);
             appendMessage('user', text);
             showTypingIndicator();
             updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 質問を送信中...");
 
-            // GASのaddQuestionアクションを呼び出す
             callGasApi("addQuestion", { email: userEmail, text: text, history: conversationHistory })
                 .then(result => {
                     const insertedRow = result.row;
                     updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 対応方法をお調べしています...");
                     startMonitoring(insertedRow);
                     
-                    // 今回の質問を履歴に追加
                     if (conversationHistory !== "") {
                         conversationHistory += "\n\n";
                     }
@@ -407,31 +391,26 @@
                 });
         }
 
-        // --- 動作概要４：E列監視 (★setIntervalから安全なsetTimeoutへ変更) ---
+        // --- 動作概要４：E列監視 ---
         function startMonitoring(row) {
-            // 既に返答を受け取っている場合、または処理が中断された場合は通信しない
             if (isAnswerReceived || !isProcessing) return;
             
-            if (monitorTimer) clearTimeout(monitorTimer); // 前のタイマーを念のためクリア
+            if (monitorTimer) clearTimeout(monitorTimer); 
             
             callGasApi("checkAnswer", { row: row })
                 .then(result => {
-                    // 通信待ちの間に受け取り完了やリセットが行われていたら無視
                     if (isAnswerReceived || !isProcessing) return;
 
-                    // E列に文字が記入された場合
                     if (result && result.answer) {
-                        isAnswerReceived = true; // ★追加: 二重処理を防ぐフラグを立てる
+                        isAnswerReceived = true; 
                         const answerText = result.answer;
                         
                         removeTypingIndicator();
-                        appendMessage('ai', answerText); // 画面に返答を表示
-                        speakText(answerText);           // 音声出力
+                        appendMessage('ai', answerText); 
+                        speakText(answerText);           
                         
-                        // システムからの回答を履歴に追加
                         conversationHistory += "\n\n－－－システムからの回答－－－\n" + answerText;
                     } else {
-                        // まだ記入されていない場合、1秒後に自分自身をもう一度呼び出す
                         monitorTimer = setTimeout(() => {
                             startMonitoring(row);
                         }, 1000);
@@ -441,7 +420,6 @@
                     console.error("監視中にエラーが発生しました:", error);
                     if (isAnswerReceived || !isProcessing) return;
                     
-                    // エラーが出た場合も、少し待ってから再試行
                     monitorTimer = setTimeout(() => {
                         startMonitoring(row);
                     }, 2000);
@@ -569,11 +547,10 @@
             if (confirm("対話を最初からやり直しますか？")) {
                 chatContainer.innerHTML = '';
                 typingIndicatorElement = null;
-                conversationHistory = ""; // ★追加: 履歴をリセット
+                conversationHistory = ""; 
                 
                 clearSilenceTimer();
                 
-                // ★追加: 実行中の監視を完全にストップさせる
                 isAnswerReceived = true; 
                 if (monitorTimer) clearTimeout(monitorTimer);
                 
