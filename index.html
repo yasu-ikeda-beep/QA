@@ -148,6 +148,7 @@
         let isAnswerReceived = false;    // ★追加: 返答受け取り済みの重複防止フラグ
         
         let userEmail = "ゲストユーザー"; 
+        let conversationHistory = "";    // ★追加: これまでの対話履歴
 
         // --- API通信用関数 (GASへのフェッチ - JSONP対応) ---
         async function callGasApi(action, params) {
@@ -386,14 +387,20 @@
             setUIState(true);
             appendMessage('user', text);
             showTypingIndicator();
-            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 質問内容を送信中...");
+            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> スプレッドシートに記入中...");
 
             // GASのaddQuestionアクションを呼び出す
-            callGasApi("addQuestion", { email: userEmail, text: text })
+            callGasApi("addQuestion", { email: userEmail, text: text, history: conversationHistory })
                 .then(result => {
                     const insertedRow = result.row;
-                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち...");
+                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち (E列を監視中)...");
                     startMonitoring(insertedRow);
+                    
+                    // 今回の質問を履歴に追加
+                    if (conversationHistory !== "") {
+                        conversationHistory += "\n\n";
+                    }
+                    conversationHistory += "－－－ユーザからの質問－－－\n" + text;
                 })
                 .catch(error => {
                     onApiError(error);
@@ -420,6 +427,9 @@
                         removeTypingIndicator();
                         appendMessage('ai', answerText); // 画面に返答を表示
                         speakText(answerText);           // 音声出力
+                        
+                        // システムからの回答を履歴に追加
+                        conversationHistory += "\n\n－－－システムからの回答－－－\n" + answerText;
                     } else {
                         // まだ記入されていない場合、1秒後に自分自身をもう一度呼び出す
                         monitorTimer = setTimeout(() => {
@@ -559,6 +569,7 @@
             if (confirm("対話を最初からやり直しますか？")) {
                 chatContainer.innerHTML = '';
                 typingIndicatorElement = null;
+                conversationHistory = ""; // ★追加: 履歴をリセット
                 
                 clearSilenceTimer();
                 
