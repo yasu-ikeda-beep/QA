@@ -104,7 +104,8 @@
                 </div>
 
                 <div id="chat-container" class="chat-container flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 pb-4">
-                    </div>
+                    <!-- チャットメッセージ領域 -->
+                </div>
             </div>
         </div>
 
@@ -112,7 +113,8 @@
             <div class="max-w-2xl mx-auto w-full flex flex-col p-4 pt-2">
                 
                 <div id="system-status" class="text-xs text-gray-600 mb-2 h-4 font-medium flex items-center px-1">
-                    </div>
+                    <!-- ステータス表示 -->
+                </div>
                 <div class="flex items-center space-x-2">
                     <button id="mic-btn" onclick="toggleRecording()" class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 flex items-center justify-center transition shadow-sm flex-shrink-0 relative">
                         <i id="mic-icon" class="fas fa-microphone text-xl relative z-10"></i>
@@ -131,25 +133,26 @@
 
     <script>
         // =========================================================================
-        // 【設定】先ほどデプロイした「1」のGASウェブアプリURLをここに貼り付けてください
-        // =========================================================================
         const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyyeL6OV9zzJTEmmBOCHrkVOAILwqDTTRaj5GK2S6Up8hZcBOn16P1KN0VUSgir4dqmug/exec"; 
+        // =========================================================================
 
         // --- 状態管理変数 ---
-        let recognition = null;     // Web Speech API インスタンス
-        let isRecording = false;    // 録音中フラグ
-        let isProcessing = false;   // API通信等の処理中フラグ
-        let audioContext = null;    // AudioContext
-        let typingIndicatorElement = null; // 処理中アニメーション要素
-        let silenceTimer = null;    // 无音検知用タイマー
-        let monitorTimer = null;    // E列監視用タイマー
+        let recognition = null;     
+        let isRecording = false;    
+        let isProcessing = false;   
+        let audioContext = null;    
+        let typingIndicatorElement = null; 
+        let silenceTimer = null;    
         
-        let userEmail = "ゲストユーザー"; // 取得したメールアドレスを保持
+        let monitorTimer = null;         // E列監視用タイマー
+        let isAnswerReceived = false;    // ★追加: 返答受け取り済みの重複防止フラグ
+        
+        let userEmail = "ゲストユーザー"; 
 
         // --- API通信用関数 (GASへのフェッチ - JSONP対応) ---
         async function callGasApi(action, params) {
             if (!GAS_API_URL || GAS_API_URL.includes("ここにウェブアプリのURL")) {
-                alert("GAS_API_URL が設定されていません。コードの156行目付近を確認してください。");
+                alert("GAS_API_URL が設定されていません。コードを確認してください。");
                 throw new Error("GAS_API_URL not configured");
             }
 
@@ -191,7 +194,7 @@
             });
         }
 
-        // --- 初期化処理：ご提示のアカウント取得仕組みをそのまま流用 ---
+        // --- 初期化処理：アカウント取得 ---
         document.addEventListener('DOMContentLoaded', () => {
             const accountNameEl = document.getElementById('account-name');
             const userApiUrl = "https://script.google.com/a/macros/unext-hd.jp/s/AKfycbz8KoBntVtOsCvb1VyYLVbPfSJTvCw4dk2R6cYaGWAXOxVlf6i-WHlv0JzO3sd_SjKG/exec";
@@ -294,7 +297,7 @@
                 for (let i = 0; i < event.results.length; ++i) {
                     fullTranscript += event.results[i][0].transcript;
                 }
-                textInput.value = fullTranscript; // ２．リアルタイムにテキスト表示
+                textInput.value = fullTranscript; 
                 startSilenceTimer(); 
             };
 
@@ -328,7 +331,6 @@
 
         function startSilenceTimer() {
             clearSilenceTimer();
-            // 発言終了後、1.5秒無音で自動確定して送信
             silenceTimer = setTimeout(() => {
                 if (isRecording && recognition) recognition.stop();
             }, 1500);
@@ -379,16 +381,18 @@
         // --- 動作概要３：スプレッドシートへの保存呼び出し ---
         function handleUserUtterance(text) {
             isProcessing = true;
+            isAnswerReceived = false; // ★追加: 質問ごとにフラグをリセット
+            
             setUIState(true);
             appendMessage('user', text);
             showTypingIndicator();
-            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> スプレッドシートに記入中...");
+            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 質問内容を送信中...");
 
             // GASのaddQuestionアクションを呼び出す
             callGasApi("addQuestion", { email: userEmail, text: text })
                 .then(result => {
                     const insertedRow = result.row;
-                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち (1秒毎にE列を監視中)...");
+                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち...");
                     startMonitoring(insertedRow);
                 })
                 .catch(error => {
@@ -396,33 +400,48 @@
                 });
         }
 
-        // --- 動作概要４：1秒毎のE列監視 ---
+        // --- 動作概要４：E列監視 (★setIntervalから安全なsetTimeoutへ変更) ---
         function startMonitoring(row) {
-            if (monitorTimer) clearInterval(monitorTimer);
+            // 既に返答を受け取っている場合、または処理が中断された場合は通信しない
+            if (isAnswerReceived || !isProcessing) return;
             
-            monitorTimer = setInterval(() => {
-                callGasApi("checkAnswer", { row: row })
-                    .then(result => {
-                        // E列に文字が記入された場合
-                        if (result && result.answer) {
-                            clearInterval(monitorTimer); // 監視をストップ
-                            const answerText = result.answer;
-                            
-                            removeTypingIndicator();
-                            appendMessage('ai', answerText); // 画面に返答を表示
-                            speakText(answerText);           // 音声出力
-                        }
-                    })
-                    .catch(error => {
-                        console.error("監視中にエラーが発生しました:", error);
-                    });
-            }, 1000); // 1秒毎
+            if (monitorTimer) clearTimeout(monitorTimer); // 前のタイマーを念のためクリア
+            
+            callGasApi("checkAnswer", { row: row })
+                .then(result => {
+                    // 通信待ちの間に受け取り完了やリセットが行われていたら無視
+                    if (isAnswerReceived || !isProcessing) return;
+
+                    // E列に文字が記入された場合
+                    if (result && result.answer) {
+                        isAnswerReceived = true; // ★追加: 二重処理を防ぐフラグを立てる
+                        const answerText = result.answer;
+                        
+                        removeTypingIndicator();
+                        appendMessage('ai', answerText); // 画面に返答を表示
+                        speakText(answerText);           // 音声出力
+                    } else {
+                        // まだ記入されていない場合、1秒後に自分自身をもう一度呼び出す
+                        monitorTimer = setTimeout(() => {
+                            startMonitoring(row);
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    console.error("監視中にエラーが発生しました:", error);
+                    if (isAnswerReceived || !isProcessing) return;
+                    
+                    // エラーが出た場合も、少し待ってから再試行
+                    monitorTimer = setTimeout(() => {
+                        startMonitoring(row);
+                    }, 2000);
+                });
         }
 
         // --- 動作概要４：ブラウザの音声出力（TTS） ---
         function speakText(text) {
             if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); // 念のため前の音声をクリア
+                window.speechSynthesis.cancel(); 
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'ja-JP';
                 
@@ -542,7 +561,11 @@
                 typingIndicatorElement = null;
                 
                 clearSilenceTimer();
-                if (monitorTimer) clearInterval(monitorTimer);
+                
+                // ★追加: 実行中の監視を完全にストップさせる
+                isAnswerReceived = true; 
+                if (monitorTimer) clearTimeout(monitorTimer);
+                
                 if (isRecording && recognition) recognition.stop();
                 if ('speechSynthesis' in window) window.speechSynthesis.cancel();
                 
