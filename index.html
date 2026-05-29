@@ -387,13 +387,13 @@
             setUIState(true);
             appendMessage('user', text);
             showTypingIndicator();
-            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> スプレッドシートに記入中...");
+            updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 質問を送信中...");
 
             // GASのaddQuestionアクションを呼び出す
             callGasApi("addQuestion", { email: userEmail, text: text, history: conversationHistory })
                 .then(result => {
                     const insertedRow = result.row;
-                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち (E列を監視中)...");
+                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 対応方法をお調べしています...");
                     startMonitoring(insertedRow);
                     
                     // 今回の質問を履歴に追加
