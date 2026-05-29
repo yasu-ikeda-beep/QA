@@ -133,7 +133,7 @@
         // =========================================================================
         // 【設定】先ほどデプロイした「1」のGASウェブアプリURLをここに貼り付けてください
         // =========================================================================
-        const GAS_API_URL = "https://script.google.com/a/macros/unext-hd.jp/s/AKfycbyyeL6OV9zzJTEmmBOCHrkVOAILwqDTTRaj5GK2S6Up8hZcBOn16P1KN0VUSgir4dqmug/exec"; 
+        const GAS_API_URL = "ここにウェブアプリのURLを貼り付け"; 
 
         // --- 状態管理変数 ---
         let recognition = null;     // Web Speech API インスタンス
@@ -142,7 +142,7 @@
         let audioContext = null;    // AudioContext
         let typingIndicatorElement = null; // 処理中アニメーション要素
         let silenceTimer = null;    // 无音検知用タイマー
-        let monitorTimer = null;    // F列監視用タイマー
+        let monitorTimer = null;    // E列監視用タイマー
         
         let userEmail = "ゲストユーザー"; // 取得したメールアドレスを保持
 
@@ -388,7 +388,7 @@
             callGasApi("addQuestion", { email: userEmail, text: text })
                 .then(result => {
                     const insertedRow = result.row;
-                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち (1秒毎にF列を監視中)...");
+                    updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 返答待ち (1秒毎にE列を監視中)...");
                     startMonitoring(insertedRow);
                 })
                 .catch(error => {
@@ -396,14 +396,14 @@
                 });
         }
 
-        // --- 動作概要４：1秒毎のF列監視 ---
+        // --- 動作概要４：1秒毎のE列監視 ---
         function startMonitoring(row) {
             if (monitorTimer) clearInterval(monitorTimer);
             
             monitorTimer = setInterval(() => {
                 callGasApi("checkAnswer", { row: row })
                     .then(result => {
-                        // F列に文字が記入された場合
+                        // E列に文字が記入された場合
                         if (result && result.answer) {
                             clearInterval(monitorTimer); // 監視をストップ
                             const answerText = result.answer;
@@ -554,12 +554,3 @@
                 startScreen.classList.add('flex');
                 chatScreen.classList.add('hidden');
                 chatScreen.classList.remove('flex');
-                
-                micError.classList.add('hidden');
-                startBtn.classList.remove('hidden');
-                startLoading.classList.add('hidden');
-            }
-        }
-    </script>
-</body>
-</html>
