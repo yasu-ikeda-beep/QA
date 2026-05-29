@@ -145,13 +145,21 @@
         let silenceTimer = null;    
         
         let monitorTimer = null;         // E列監視用タイマー
-        let isAnswerReceived = false;    // ★追加: 返答受け取り済みの重複防止フラグ
+        let isAnswerReceived = false;    // 返答受け取り済みの重複防止フラグ
         
         let userEmail = "ゲストユーザー"; 
-        let conversationHistory = "";    // ★追加: これまでの対話履歴
+        let conversationHistory = "";    // これまでの対話履歴
 
-        // --- API通信用関数 (大量のテキストに対応したPOST送信に変更) ---
-        async function callGasApi(action, params) {
+        // --- 管理用のユニークID(UUID)生成関数 ---
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // --- API通信用関数 (書き込み用：POST送信) ---
+        async function callGasApiPost(action, params) {
             if (!GAS_API_URL || GAS_API_URL.includes("ここにウェブアプリのURL")) {
                 alert("GAS_API_URL が設定されていません。コードを確認してください。");
                 throw new Error("GAS_API_URL not configured");
@@ -164,21 +172,61 @@
             }
 
             try {
-                const response = await fetch(GAS_API_URL, {
+                // no-corsモードで送信し、CORSエラーを回避（レスポンスは読まない）
+                await fetch(GAS_API_URL, {
                     method: 'POST',
+                    mode: 'no-cors',
                     body: formData
                 });
-                
-                const data = await response.json();
-                
-                if (data.status === "error") {
-                    throw new Error(data.message);
-                }
-                return data.data;
+                return { status: "success" };
             } catch (error) {
-                console.error("API Error:", error);
-                throw new Error("GASとの通信に失敗しました。URLや公開設定を確認してください。");
+                console.error("API Error (POST):", error);
+                throw new Error("スプレッドシートへの送信に失敗しました。");
             }
+        }
+
+        // --- API通信用関数 (監視用：GET(JSONP)送信) ---
+        async function callGasApiGet(action, params) {
+            if (!GAS_API_URL || GAS_API_URL.includes("ここにウェブアプリのURL")) {
+                throw new Error("GAS_API_URL not configured");
+            }
+
+            return new Promise((resolve, reject) => {
+                const callbackName = 'jsonp_callback_' + Math.round(1000000 * Math.random());
+                
+                window[callbackName] = function(data) {
+                    delete window[callbackName];
+                    const scriptEl = document.getElementById(callbackName);
+                    if (scriptEl) document.body.removeChild(scriptEl);
+                    
+                    if (data.status === "error") {
+                        reject(new Error(data.message));
+                    } else {
+                        resolve(data.data);
+                    }
+                };
+
+                const script = document.createElement('script');
+                script.id = callbackName;
+                
+                const queryParams = new URLSearchParams();
+                queryParams.append('action', action);
+                queryParams.append('callback', callbackName);
+                
+                for (const key in params) {
+                    queryParams.append(key, params[key]);
+                }
+
+                script.src = `${GAS_API_URL}?${queryParams.toString()}`;
+                
+                script.onerror = function() {
+                    delete window[callbackName];
+                    if (script.parentNode) document.body.removeChild(script);
+                    reject(new Error("監視用の通信に失敗しました。"));
+                };
+
+                document.body.appendChild(script);
+            });
         }
 
         // --- 初期化処理：アカウント取得 ---
@@ -186,7 +234,16 @@
             const accountNameEl = document.getElementById('account-name');
             const userApiUrl = "https://script.google.com/a/macros/unext-hd.jp/s/AKfycbz8KoBntVtOsCvb1VyYLVbPfSJTvCw4dk2R6cYaGWAXOxVlf6i-WHlv0JzO3sd_SjKG/exec";
 
+            // 5秒経過しても取得できない場合のフォールバックタイマー
+            const fallbackTimer = setTimeout(() => {
+                if (accountNameEl && accountNameEl.textContent === "ユーザー情報取得中...") {
+                    userEmail = "ゲストユーザー";
+                    accountNameEl.textContent = "ゲストユーザー (タイムアウト)";
+                }
+            }, 5000);
+
             window.handleEmailResponse = function(data) {
+                clearTimeout(fallbackTimer);
                 let email = data.email || "";
                 if (email && email !== "") {
                     userEmail = email; 
@@ -204,9 +261,10 @@
             script.src = userApiUrl + "?callback=handleEmailResponse";
             
             script.onerror = function() {
+                clearTimeout(fallbackTimer);
                 console.error("メールアドレスAPIの読み込みに失敗しました");
                 userEmail = "ゲストユーザー";
-                accountNameEl.textContent = "ゲストユーザー";
+                accountNameEl.textContent = "ゲストユーザー (取得失敗)";
             };
             document.body.appendChild(script);
         });
@@ -375,11 +433,13 @@
             showTypingIndicator();
             updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 質問を送信中...");
 
-            callGasApi("addQuestion", { email: userEmail, text: text, history: conversationHistory })
-                .then(result => {
-                    const insertedRow = result.row;
+            // 行番号の代わりに独自のIDを生成して紐付ける
+            const uuid = generateUUID();
+
+            callGasApiPost("addQuestion", { email: userEmail, text: text, history: conversationHistory, uuid: uuid })
+                .then(() => {
                     updateSystemStatus("<i class='fas fa-circle-notch fa-spin mr-1'></i> 対応方法をお調べしています...");
-                    startMonitoring(insertedRow);
+                    startMonitoring(uuid); // 生成したIDを使って監視を開始
                     
                     if (conversationHistory !== "") {
                         conversationHistory += "\n\n";
@@ -392,12 +452,12 @@
         }
 
         // --- 動作概要４：E列監視 ---
-        function startMonitoring(row) {
+        function startMonitoring(uuid) {
             if (isAnswerReceived || !isProcessing) return;
             
             if (monitorTimer) clearTimeout(monitorTimer); 
             
-            callGasApi("checkAnswer", { row: row })
+            callGasApiGet("checkAnswer", { uuid: uuid })
                 .then(result => {
                     if (isAnswerReceived || !isProcessing) return;
 
@@ -412,7 +472,7 @@
                         conversationHistory += "\n\n－－－システムからの回答－－－\n" + answerText;
                     } else {
                         monitorTimer = setTimeout(() => {
-                            startMonitoring(row);
+                            startMonitoring(uuid);
                         }, 1000);
                     }
                 })
@@ -421,7 +481,7 @@
                     if (isAnswerReceived || !isProcessing) return;
                     
                     monitorTimer = setTimeout(() => {
-                        startMonitoring(row);
+                        startMonitoring(uuid);
                     }, 2000);
                 });
         }
@@ -526,16 +586,16 @@
             
             if (sender === 'user') {
                 wrapper.className = "flex w-full justify-end";
-                bubble.className = "bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[85%] shadow-sm text-sm leading-relaxed";
-                bubble.innerHTML = text.replace(/\n/g, '<br>');
+                bubble.className = "bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[85%] shadow-sm text-sm leading-relaxed whitespace-pre-wrap";
+                bubble.textContent = text;
             } else if (sender === 'ai') {
                 wrapper.className = "flex w-full justify-start";
-                bubble.className = "bg-white text-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[85%] shadow-sm border border-gray-100 text-sm leading-relaxed";
-                bubble.innerHTML = text.replace(/\n/g, '<br>');
+                bubble.className = "bg-white text-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[85%] shadow-sm border border-gray-100 text-sm leading-relaxed whitespace-pre-wrap";
+                bubble.textContent = text;
             } else { 
                 wrapper.className = "flex w-full justify-center my-3";
-                bubble.className = "bg-gray-200 text-gray-600 rounded-xl px-4 py-2 text-xs font-medium max-w-[90%]";
-                bubble.innerHTML = text.replace(/\n/g, '<br>'); 
+                bubble.className = "bg-gray-200 text-gray-600 rounded-xl px-4 py-2 text-xs font-medium max-w-[90%] whitespace-pre-wrap";
+                bubble.textContent = text;
             }
 
             wrapper.appendChild(bubble);
