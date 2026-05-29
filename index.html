@@ -133,7 +133,7 @@
         // =========================================================================
         // 【設定】先ほどデプロイした「1」のGASウェブアプリURLをここに貼り付けてください
         // =========================================================================
-        const GAS_API_URL = "ここにウェブアプリのURLを貼り付け"; 
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyyeL6OV9zzJTEmmBOCHrkVOAILwqDTTRaj5GK2S6Up8hZcBOn16P1KN0VUSgir4dqmug/exec"; 
 
         // --- 状態管理変数 ---
         let recognition = null;     // Web Speech API インスタンス
@@ -194,7 +194,7 @@
         // --- 初期化処理：ご提示のアカウント取得仕組みをそのまま流用 ---
         document.addEventListener('DOMContentLoaded', () => {
             const accountNameEl = document.getElementById('account-name');
-            const userApiUrl = "https://script.google.com/macros/s/AKfycbyyeL6OV9zzJTEmmBOCHrkVOAILwqDTTRaj5GK2S6Up8hZcBOn16P1KN0VUSgir4dqmug/exec";
+            const userApiUrl = "https://script.google.com/a/macros/unext-hd.jp/s/AKfycbz8KoBntVtOsCvb1VyYLVbPfSJTvCw4dk2R6cYaGWAXOxVlf6i-WHlv0JzO3sd_SjKG/exec";
 
             window.handleEmailResponse = function(data) {
                 let email = data.email || "";
