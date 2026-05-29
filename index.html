@@ -158,31 +158,49 @@
             });
         }
 
-        // --- API通信用関数 (書き込み用：POST送信) ---
+        // --- API通信用関数 (書き込み用：隠しフォームによるPOST送信) ---
+        // 401 Unauthorized エラー対策として、formとiframeを使って送信します
         async function callGasApiPost(action, params) {
             if (!GAS_API_URL || GAS_API_URL.includes("ここにウェブアプリのURL")) {
                 alert("GAS_API_URL が設定されていません。コードを確認してください。");
                 throw new Error("GAS_API_URL not configured");
             }
 
-            const formData = new URLSearchParams();
-            formData.append('action', action);
-            for (const key in params) {
-                formData.append(key, params[key]);
-            }
+            return new Promise((resolve, reject) => {
+                const iframeName = 'post_iframe_' + Math.round(1000000 * Math.random());
+                
+                const iframe = document.createElement('iframe');
+                iframe.name = iframeName;
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
 
-            try {
-                // no-corsモードで送信し、CORSエラーを回避（レスポンスは読まない）
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    body: formData
-                });
-                return { status: "success" };
-            } catch (error) {
-                console.error("API Error (POST):", error);
-                throw new Error("スプレッドシートへの送信に失敗しました。");
-            }
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = GAS_API_URL;
+                form.target = iframeName;
+                form.style.display = 'none';
+
+                const paramsObj = { action: action, ...params };
+                for (const key in paramsObj) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = paramsObj[key];
+                    form.appendChild(input);
+                }
+
+                document.body.appendChild(form);
+
+                iframe.onload = function() {
+                    setTimeout(() => {
+                        if (form.parentNode) document.body.removeChild(form);
+                        if (iframe.parentNode) document.body.removeChild(iframe);
+                    }, 1000);
+                    resolve({ status: "success" });
+                };
+
+                form.submit();
+            });
         }
 
         // --- API通信用関数 (監視用：GET(JSONP)送信) ---
